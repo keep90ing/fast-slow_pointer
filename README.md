@@ -52,10 +52,11 @@ make
 `runner` 會：
 
 - 先建立一次指定型態與大小的 linked list
-- 再依 `algo` 對同一條 list 執行 `rounds` 次 middle-node 查找
+- 只在 traversal 期間啟用 `perf_event_open()` 計數器
+- traversal 結束立刻停用計數器，最後才 `free` list
 
 ```bash
-./bin/runner <mode> <count> <algo> <rounds>
+./bin/runner <mode> <count> <algo> <rounds> [seed]
 ```
 
 參數：
@@ -64,10 +65,19 @@ make
 - `count`: 節點數量（`> 0`）
 - `algo`: `single|single_pointer|1`、`fastslow|fast_and_slow|2`
 - `rounds`: 執行輪數（`> 0`）
+- `seed`: 可選，固定 random 模式用的 seed（不給就用目前時間）
+
+輸出至少包含：
+
+- `elapsed(sec)`
+- `cache-references:u`
+- `cache-misses:u`
+- `cache-miss-rate`
+- `IPC`
 
 範例：
 
 ```bash
 ./bin/runner contiguous 1000000 single 100
-./bin/runner random 1000000 fastslow 100
+./bin/runner random 1000000 fastslow 100 12345
 ```
