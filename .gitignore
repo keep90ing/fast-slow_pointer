@@ -1,0 +1,29 @@
+# Build output
+/bin/
+/build/
+
+# Generic compiled binaries
+*.out
+*.exe
+*.app
+
+# Object and dependency files
+*.o
+*.obj
+*.d
+
+# Static and shared libraries
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+
+# Debug/profiling artifacts
+*.core
+core.*
+vgcore.*
+gmon.out
+
+# macOS debug symbols
+*.dSYM/
