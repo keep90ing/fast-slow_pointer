@@ -1,7 +1,7 @@
 # Build output
 /bin/
 /build/
-
+/docs/
 # Generic compiled binaries
 *.out
 *.exe

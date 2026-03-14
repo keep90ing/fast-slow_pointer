@@ -118,7 +118,7 @@ static int parse_seed(const char *seed_str, unsigned int *out)
 static void usage(const char *prog)
 {
     fprintf(stderr, "Usage: %s <mode> <count> <algo> <rounds> [seed]\n", prog);
-    fprintf(stderr, "  mode: contiguous | sequential | random | 1 | 2 | 3\n");
+    fprintf(stderr, "  mode: sequential | random | 1 | 2\n");
     fprintf(stderr, "  count: number of nodes (> 0)\n");
     fprintf(stderr, "  algo: single | fastslow | 1 | 2\n");
     fprintf(stderr, "  rounds: run count (> 0)\n");
@@ -291,6 +291,6 @@ int main(int argc, char **argv)
 
 cleanup:
     close_perf_counters(&counters);
-    destroy_list(head, list_mode);
+    free_list(head);
     return ret;
 }
