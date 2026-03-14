@@ -27,6 +27,7 @@ struct perf_counters {
     int cache_refs_fd;
     int cache_misses_fd;
     int instructions_fd;
+    int l1d_prefetches_fd;
 };
 
 static int perf_event_open(struct perf_event_attr *attr, pid_t pid, int cpu,
@@ -51,8 +52,30 @@ static int open_hw_counter(uint64_t config, int group_fd, int disabled)
     return perf_event_open(&attr, 0, -1, group_fd, 0);
 }
 
+static int open_hw_cache_counter(uint64_t cache_id, uint64_t op_id,
+                                 uint64_t result_id, int group_fd,
+                                 int disabled)
+{
+    struct perf_event_attr attr;
+
+    memset(&attr, 0, sizeof(attr));
+    attr.type = PERF_TYPE_HW_CACHE;
+    attr.size = sizeof(attr);
+    attr.config = cache_id |
+                  (op_id << 8) |
+                  (result_id << 16);
+    attr.disabled = disabled;
+    attr.exclude_kernel = 1;
+    attr.exclude_hv = 1;
+    attr.exclude_idle = 1;
+
+    return perf_event_open(&attr, 0, -1, group_fd, 0);
+}
+
 static void close_perf_counters(struct perf_counters *counters)
 {
+    if (counters->l1d_prefetches_fd >= 0)
+        close(counters->l1d_prefetches_fd);
     if (counters->instructions_fd >= 0)
         close(counters->instructions_fd);
     if (counters->cache_misses_fd >= 0)
@@ -69,6 +92,7 @@ static int open_perf_counters(struct perf_counters *counters)
     counters->cache_refs_fd = -1;
     counters->cache_misses_fd = -1;
     counters->instructions_fd = -1;
+    counters->l1d_prefetches_fd = -1;
 
     counters->leader_fd =
         open_hw_counter(PERF_COUNT_HW_CPU_CYCLES, -1, 1);
@@ -88,6 +112,14 @@ static int open_perf_counters(struct perf_counters *counters)
     counters->instructions_fd = open_hw_counter(PERF_COUNT_HW_INSTRUCTIONS,
                                                 counters->leader_fd, 0);
     if (counters->instructions_fd < 0)
+        return -1;
+
+    counters->l1d_prefetches_fd =
+        open_hw_cache_counter(PERF_COUNT_HW_CACHE_L1D,
+                              PERF_COUNT_HW_CACHE_OP_PREFETCH,
+                              PERF_COUNT_HW_CACHE_RESULT_ACCESS,
+                              -1, 1);
+    if (counters->l1d_prefetches_fd < 0)
         return -1;
 
     return 0;
@@ -165,6 +197,7 @@ int main(int argc, char **argv)
     uint64_t cache_misses = 0;
     uint64_t cycles = 0;
     uint64_t instructions = 0;
+    uint64_t l1d_prefetches = 0;
     double cache_miss_rate = 0.0;
     double ipc = 0.0;
 
@@ -223,9 +256,17 @@ int main(int argc, char **argv)
         perror("PERF_EVENT_IOC_RESET failed");
         goto cleanup;
     }
+    if (ioctl(counters.l1d_prefetches_fd, PERF_EVENT_IOC_RESET, 0) < 0) {
+        perror("L1-dcache-prefetches reset failed");
+        goto cleanup;
+    }
 
     if (ioctl(counters.leader_fd, PERF_EVENT_IOC_ENABLE, PERF_IOC_FLAG_GROUP) < 0) {
         perror("PERF_EVENT_IOC_ENABLE failed");
+        goto cleanup;
+    }
+    if (ioctl(counters.l1d_prefetches_fd, PERF_EVENT_IOC_ENABLE, 0) < 0) {
+        perror("L1-dcache-prefetches enable failed");
         goto cleanup;
     }
 
@@ -250,6 +291,10 @@ int main(int argc, char **argv)
         perror("PERF_EVENT_IOC_DISABLE failed");
         goto cleanup;
     }
+    if (ioctl(counters.l1d_prefetches_fd, PERF_EVENT_IOC_DISABLE, 0) < 0) {
+        perror("L1-dcache-prefetches disable failed");
+        goto cleanup;
+    }
 
     if (read_counter_value(counters.cache_refs_fd, &cache_refs) < 0) {
         perror("read cache-references failed");
@@ -265,6 +310,10 @@ int main(int argc, char **argv)
     }
     if (read_counter_value(counters.instructions_fd, &instructions) < 0) {
         perror("read instructions failed");
+        goto cleanup;
+    }
+    if (read_counter_value(counters.l1d_prefetches_fd, &l1d_prefetches) < 0) {
+        perror("read L1-dcache-prefetches failed");
         goto cleanup;
     }
 
@@ -285,6 +334,7 @@ int main(int argc, char **argv)
     printf("cache-references:u: %" PRIu64 "\n", cache_refs);
     printf("cache-misses:u: %" PRIu64 "\n", cache_misses);
     printf("cache-miss-rate: %.2f%%\n", cache_miss_rate);
+    printf("L1-dcache-prefetches:u: %" PRIu64 "\n", l1d_prefetches);
     printf("IPC: %.2f\n", ipc);
 
     ret = 0;

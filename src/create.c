@@ -2,19 +2,8 @@
 
 #include <errno.h>
 #include <limits.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-
-#ifndef CREATE_NO_MAIN
-static void usage(const char *prog)
-{
-    fprintf(stderr, "Usage: %s <mode> <count>\n", prog);
-    fprintf(stderr, "  mode: contiguous | sequential | random | 1 | 2 | 3\n");
-    fprintf(stderr, "  count: number of nodes (> 0)\n");
-}
-#endif
 
 int create_parse_mode(const char *mode_str)
 {
@@ -54,6 +43,13 @@ static void shuffle_int_array(int *arr, int n)
     }
 }
 
+static void append_node_indirect(struct list_node *node,
+                                 struct list_node ***indirect)
+{
+    **indirect = node;
+    *indirect = &node->next;
+}
+
 static struct list_node *create_contiguous(int n)
 {
     int i;
@@ -73,7 +69,7 @@ static struct list_node *create_sequential(int n)
 {
     int i;
     struct list_node *head = NULL;
-    struct list_node *tail = NULL;
+    struct list_node **indirect = &head;
 
     for (i = 0; i < n; ++i) {
         struct list_node *node = malloc(sizeof(*node));
@@ -89,11 +85,7 @@ static struct list_node *create_sequential(int n)
 
         node->val = i;
         node->next = NULL;
-        if (!head)
-            head = node;
-        else
-            tail->next = node;
-        tail = node;
+        append_node_indirect(node, &indirect);
     }
     return head;
 }
@@ -101,7 +93,8 @@ static struct list_node *create_sequential(int n)
 static struct list_node *create_randomized(int n)
 {
     int i;
-    struct list_node *head;
+    struct list_node *head = NULL;
+    struct list_node **indirect = &head;
     struct list_node **nodes = malloc((size_t)n * sizeof(*nodes));
     int *perm = malloc((size_t)n * sizeof(*perm));
 
@@ -126,11 +119,10 @@ static struct list_node *create_randomized(int n)
     }
 
     shuffle_int_array(perm, n);
-    for (i = 0; i < n - 1; ++i)
-        nodes[perm[i]]->next = nodes[perm[i + 1]];
-    nodes[perm[n - 1]]->next = NULL;
+    for (i = 0; i < n; ++i)
+        append_node_indirect(nodes[perm[i]], &indirect);
+    *indirect = NULL;
 
-    head = nodes[perm[0]];
     free(nodes);
     free(perm);
     return head;
@@ -174,53 +166,3 @@ const char *create_mode_name(int mode)
         return "random";
     return "unknown";
 }
-
-#ifndef CREATE_NO_MAIN
-int main(int argc, char **argv)
-{
-    int mode;
-    int count;
-    int preview = 10;
-    int shown = 0;
-    struct list_node *head;
-    struct list_node *cur;
-
-    if (argc != 3) {
-        usage(argv[0]);
-        return 1;
-    }
-
-    mode = create_parse_mode(argv[1]);
-    if (!mode) {
-        usage(argv[0]);
-        return 1;
-    }
-
-    if (create_parse_count(argv[2], &count) < 0) {
-        usage(argv[0]);
-        return 1;
-    }
-
-    srand((unsigned int)time(NULL));
-    head = create_list(mode, count);
-    if (!head) {
-        fprintf(stderr, "Failed to create list.\n");
-        return 1;
-    }
-
-    printf("mode=%s, count=%d\n", create_mode_name(mode), count);
-    printf("head=%p\n", (void *)head);
-    printf("preview(first %d nodes):\n", preview);
-
-    cur = head;
-    while (cur && shown < preview) {
-        printf("  [%d] node=%p val=%d next=%p\n",
-               shown, (void *)cur, cur->val, (void *)cur->next);
-        cur = cur->next;
-        ++shown;
-    }
-
-    destroy_list(head, mode);
-    return 0;
-}
-#endif
