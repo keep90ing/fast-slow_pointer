@@ -26,28 +26,28 @@ static int parse_seed(const char *seed_str, unsigned int *out)
 static void usage(const char *prog)
 {
     fprintf(stderr, "Usage: %s <mode> <count> [seed]\n", prog);
-    fprintf(stderr, "  mode: contiguous | sequential | random | 1 | 2 | 3\n");
+    fprintf(stderr, "  mode: sequential | random | 1 | 2\n");
     fprintf(stderr, "  count: number of nodes (> 0)\n");
     fprintf(stderr, "  seed: optional unsigned integer, only used for random mode\n");
 }
 
 int main(int argc, char **argv)
 {
-    int list_mode;
+    int mode;
     int count;
+    int index = 0;
     unsigned int seed;
     int use_fixed_seed = 0;
     struct list_node *head;
     struct list_node *cur;
-    int index = 0;
 
     if (argc != 3 && argc != 4) {
         usage(argv[0]);
         return 1;
     }
 
-    list_mode = create_parse_mode(argv[1]);
-    if (!list_mode) {
+    mode = create_parse_mode(argv[1]);
+    if (!mode) {
         usage(argv[0]);
         return 1;
     }
@@ -68,24 +68,29 @@ int main(int argc, char **argv)
     }
 
     srand(seed);
-    head = create_list(list_mode, count);
+    head = create_list(mode, count);
     if (!head) {
         fprintf(stderr, "Failed to create list.\n");
         return 1;
     }
 
-    printf("mode=%s, count=%d\n", create_mode_name(list_mode), count);
-    if (list_mode == MODE_RANDOM && use_fixed_seed)
+    printf("mode=%s, count=%d\n", create_mode_name(mode), count);
+    if (mode == MODE_RANDOM && use_fixed_seed)
         printf("seed=%u\n", seed);
-    printf("linked-list addresses:\n");
 
     cur = head;
     while (cur) {
-        printf("  [%d] %p ----> %p\n", index, (void *)cur, (void *)cur->next);
+        if (cur->next) {
+            printf("[%d] val=%-2d (%p) -> (%p)\n",
+                   index, cur->val, (void *)cur, (void *)cur->next);
+        } else {
+            printf("[%d] val=%-2d (%p) -> NULL\n",
+                   index, cur->val, (void *)cur);
+        }
         cur = cur->next;
         ++index;
     }
 
-    destroy_list(head, list_mode);
+    free_list(head);
     return 0;
 }
