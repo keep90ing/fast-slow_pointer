@@ -17,7 +17,7 @@
 make
 ```
 
-## runner: create + algorithm benchmark loop
+## runner: create + algorithm benchmark
 
 `runner` 會：
 
@@ -27,7 +27,7 @@ make
 - traversal 結束立刻停用計數器，最後才 `free` list
 
 ```bash
-./bin/runner <mode> <count> <algo> <rounds> [seed]
+./bin/runner <mode> <count> <algo> [seed]
 ```
 
 參數：
@@ -35,7 +35,6 @@ make
 - `mode`: `sequential|1`、`random|2`
 - `count`: 節點數量（`> 0`）
 - `algo`: `single|single_pointer|1`、`fastslow|fast_and_slow|2`
-- `rounds`: 執行輪數（`> 0`）
 - `seed`: 可選，固定 random 模式用的 seed（不給就用目前時間）
 
 輸出至少包含：
@@ -49,13 +48,13 @@ make
 範例：
 
 ```bash
-./bin/runner sequential 1000000 single 100
-./bin/runner random 1000000 fastslow 100 12345
+./bin/runner sequential 1000000 single
+./bin/runner random 1000000 fastslow 12345
 ```
 
 ## traverse: create + traversal only
 
-`traverse` 的參數和 `runner` 相同，但不做任何 `perf_event_open()` 採樣。
+`traverse` 保留 `rounds` 參數，但不做任何 `perf_event_open()` 採樣。
 
 ```bash
 ./bin/traverse <mode> <count> <algo> <rounds> [seed]

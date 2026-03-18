@@ -39,35 +39,6 @@ static double elapsed_seconds(const struct timespec *start,
            (double)(end->tv_nsec - start->tv_nsec) / 1000000000.0;
 }
 
-static void fisher_yates_shuffle(struct list_node **head)
-{
-    int len = 0;
-    struct list_node **indirect = head;
-    struct list_node *new_head = NULL;
-    struct list_node **tail_next = &new_head;
-
-    while (*indirect) {
-        ++len;
-        indirect = &(*indirect)->next;
-    }
-
-    while (len > 0) {
-        int random = rand() % len;
-
-        indirect = head;
-        while (random-- > 0)
-            indirect = &(*indirect)->next;
-
-        *tail_next = *indirect;
-        *indirect = (*indirect)->next;
-        (*tail_next)->next = NULL;
-        tail_next = &(*tail_next)->next;
-        --len;
-    }
-
-    *head = new_head;
-}
-
 static void split_list(struct list_node *source, struct list_node **front,
                        struct list_node **back)
 {
@@ -126,9 +97,9 @@ int main(int argc, char **argv)
 {
     int count;
     unsigned int seed;
-    struct list_node *fisher_list, *merge_list;
+    struct list_node *merge_list;
     struct timespec start, end;
-    double fisher_sec, merge_sec;
+    double merge_sec;
 
     if (argc != 2 && argc != 3) {
         usage(argv[0]);
@@ -149,11 +120,9 @@ int main(int argc, char **argv)
         seed = (unsigned int)time(NULL);
     }
 
-    fisher_list = create_list(MODE_SEQUENTIAL, count);
     merge_list = create_list(MODE_SEQUENTIAL, count);
-    if (!fisher_list || !merge_list) {
+    if (!merge_list){
         fprintf(stderr, "Failed to create benchmark lists.\n");
-        free_list(fisher_list);
         free_list(merge_list);
         return 1;
     }
@@ -161,30 +130,12 @@ int main(int argc, char **argv)
     srand(seed);
     if (clock_gettime(CLOCK_MONOTONIC, &start) < 0) {
         perror("clock_gettime(start) failed");
-        free_list(fisher_list);
-        free_list(merge_list);
-        return 1;
-    }
-    fisher_yates_shuffle(&fisher_list);
-    if (clock_gettime(CLOCK_MONOTONIC, &end) < 0) {
-        perror("clock_gettime(end) failed");
-        free_list(fisher_list);
-        free_list(merge_list);
-        return 1;
-    }
-    fisher_sec = elapsed_seconds(&start, &end);
-
-    srand(seed);
-    if (clock_gettime(CLOCK_MONOTONIC, &start) < 0) {
-        perror("clock_gettime(start) failed");
-        free_list(fisher_list);
         free_list(merge_list);
         return 1;
     }
     merge_shuffle(&merge_list);
     if (clock_gettime(CLOCK_MONOTONIC, &end) < 0) {
         perror("clock_gettime(end) failed");
-        free_list(fisher_list);
         free_list(merge_list);
         return 1;
     }
@@ -192,10 +143,9 @@ int main(int argc, char **argv)
 
     printf("count=%d\n", count);
     printf("seed=%u\n", seed);
-    printf("fisher_yates_like_shuffle: %.6f sec\n", fisher_sec);
+
     printf("merge_shuffle: %.6f sec\n", merge_sec);
 
-    free_list(fisher_list);
     free_list(merge_list);
     return 0;
 }

@@ -65,18 +65,13 @@ static const char *algo_mode_name(int mode)
 
 int main(int argc, char **argv)
 {
-    int list_mode;
-    int count;
-    int algo_mode;
-    int rounds;
+    int list_mode, count, algo_mode, rounds;
     unsigned int seed;
     int use_fixed_seed = 0;
     int i;
-    struct timespec start_ts;
-    struct timespec end_ts;
+    struct timespec start_ts,end_ts;
     double elapsed_sec = 0.0;
-    struct list_node *head;
-    struct list_node *mid = NULL;
+    struct list_node *head, *mid = NULL;
 
     if (argc != 5 && argc != 6) {
         usage(argv[0]);
@@ -150,6 +145,7 @@ int main(int argc, char **argv)
         printf("seed=%u\n", seed);
     if (mid)
         printf("middle node: addr=%p, val=%d\n", (void *)mid, mid->val);
+        
     printf("elapsed(sec): %.6f\n", elapsed_sec);
 
     free_list(head);

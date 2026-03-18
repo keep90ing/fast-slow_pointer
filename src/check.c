@@ -80,8 +80,13 @@ int main(int argc, char **argv)
 
     cur = head;
     while (cur) {
-        printf("node %d = (%p), val = %d, next = %p\n",
-               index, (void *)cur, cur->val, (void *)cur->next);
+        if (cur->next) {
+            printf("[%d] val=%-2d (%p) -> (%p)\n",
+                   index, cur->val, (void *)cur, (void *)cur->next);
+        } else {
+            printf("[%d] val=%-2d (%p) -> NULL\n",
+                   index, cur->val, (void *)cur);
+        }
         cur = cur->next;
         ++index;
     }

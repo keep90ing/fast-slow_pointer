@@ -33,74 +33,72 @@ int create_parse_count(const char *count_str, int *out)
 
 // build_list creates a simple linked list with values from 1 to n, where each node is allocated separately on the heap.
 static struct list_node *build_list(int n) {
-    struct list_node *head = NULL;     
-    struct list_node **indirect = &head; 
+    struct list_node *head = NULL;
+    struct list_node **indirect = &head;
+    struct list_node *new;
 
     for (int i = 1; i <= n; i++) {
+        new = malloc(1 * sizeof(*new));
         
-        struct list_node *new_node = malloc(sizeof(struct list_node));
-        if (!new_node) {
-            struct list_node *cur = head;
-            while (cur) {
-                struct list_node *temp = cur;
-                cur = cur->next;
-                free(temp);
-            }
-            return NULL; 
-        }
+        if (!new)
+            goto err_free_list; // error handling: jump to centralized cleanup on malloc failure
         
-        // initialize the new node
-        new_node->val = i;
-        new_node->next = NULL;
+        new->val = i, new->next = NULL;
 
-        // link the new node to the list
-        *indirect = new_node;
-
-        // move the indirect pointer to the next field of the new node
-        indirect = &(*indirect)->next;
+        *indirect = new;
+        indirect = &(*indirect)->next; 
     }
 
     return head;
+
+err_free_list:
+    /* safe cleanup */
+    while (head) {
+        new = head;
+        head = head->next;
+        free(new);
+    }
+    return NULL; 
 }
 
-static void fisher_yates_shuffle(struct list_node **head)
-{
-    // First, we have to know how long is the linked list
+static void shuffle_with_array(struct list_node **head) {
+    if (!head || !*head || !(*head)->next) return;
+
+    // 1. compute the length of the linked list
     int len = 0;
-    struct list_node **indirect = head;
-    while (*indirect) {
+    for (struct list_node *curr = *head; curr; curr = curr->next) {
         len++;
+    }
+
+    // 2. malloc an array to hold the node pointers
+    struct list_node **arr = malloc(len * sizeof(struct list_node *));
+    if (!arr) return; // malloc failed
+
+    struct list_node *curr = *head;
+    for (int i = 0; i < len; i++) {
+        arr[i] = curr;
+        curr = curr->next;
+    }
+
+    // 3. execute Fisher-Yates shuffle on the array
+    for (int i = len - 1; i > 0; i--) {
+        int random = rand() % (i + 1);
+        struct list_node *tmp = arr[i];
+        arr[i] = arr[random];
+        arr[random] = tmp;
+    }
+
+    // 4. append shuffled nodes to a new linked list
+    struct list_node **indirect = head;
+    for (int i = 0; i < len; i++) {
+        *indirect = arr[i];
         indirect = &(*indirect)->next;
-    }   
+    }
+    *indirect = NULL;
 
-    // Append shuffling result to another linked list
-    struct list_node *new = NULL;
-    struct list_node **new_head = &new;
-    struct list_node **new_tail = &new;
-
-    while (len) {
-        int random = rand() % len;
-        indirect = head;
-
-        while (random--)
-            indirect = &(*indirect)->next;
-
-        struct list_node *tmp = *indirect;
-        *indirect = (*indirect)->next;
-
-        tmp->next = NULL;
-        if (new) {
-            (*new_tail)->next = tmp;
-            new_tail = &(*new_tail)->next;
-        } else {
-            new = tmp;
-        }
-
-        len--;
-    }   
-
-    *head = *new_head;
+    free(arr);
 }
+
 
 static struct list_node *create_sequential(int n)
 {
@@ -111,7 +109,7 @@ static struct list_node *create_sequential(int n)
 static struct list_node *create_randomized(int n)
 {
     struct list_node *head = build_list(n);
-    fisher_yates_shuffle(&head);
+    shuffle_with_array(&head);
     return head;
 }
 
