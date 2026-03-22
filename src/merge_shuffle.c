@@ -47,7 +47,7 @@ static void split_list(struct list_node *source, struct list_node **front,
 
     while (fast) {
         fast = fast->next;
-        if (fast) {
+        if (fast) { 
             slow = slow->next;
             fast = fast->next;
         }
@@ -81,15 +81,17 @@ static struct list_node *random_merge(struct list_node *a, struct list_node *b)
 
 static void merge_shuffle(struct list_node **head)
 {
-    struct list_node *front;
-    struct list_node *back;
-
     if (!head || !*head || !(*head)->next)
         return;
 
+    struct list_node *front;
+    struct list_node *back;
+
     split_list(*head, &front, &back);
+
     merge_shuffle(&front);
     merge_shuffle(&back);
+    
     *head = random_merge(front, back);
 }
 

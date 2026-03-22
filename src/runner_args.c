@@ -64,23 +64,12 @@ int runner_args_parse(int argc, char **argv, struct runner_args *out)
     if (!out->algo_mode)
         return -1;
 
-    out->use_fixed_seed = 0;
     if (argc == 5) {
         if (parse_seed(argv[4], &out->seed) < 0)
             return -1;
-        out->use_fixed_seed = 1;
     } else {
         out->seed = (unsigned int)time(NULL);
     }
 
     return 0;
-}
-
-const char *runner_algo_mode_name(int mode)
-{
-    if (mode == RUNNER_ALGO_SINGLE)
-        return "single_pointer";
-    if (mode == RUNNER_ALGO_FAST_SLOW)
-        return "fast_and_slow";
-    return "unknown";
 }

@@ -2,6 +2,8 @@
 /bin/
 /build/
 /docs/
+/logs/
+/perf/
 # Generic compiled binaries
 *.out
 *.exe
@@ -27,3 +29,6 @@ gmon.out
 
 # macOS debug symbols
 *.dSYM/
+
+*.data
+*.sh

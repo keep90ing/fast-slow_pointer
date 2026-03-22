@@ -1,5 +1,5 @@
-#define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE
 
 #include "create.h"
 #include "fast_and_slow.h"
@@ -11,21 +11,40 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+static double percent_rate(uint64_t numerator, uint64_t denominator)
+{
+    if (denominator == 0)
+        return 0.0;
+    return 100.0 * (double)numerator / (double)denominator;
+}
+
+static const char *algo_mode_name(int algo_mode)
+{
+    if (algo_mode == RUNNER_ALGO_SINGLE)
+        return "single_pointer";
+    if (algo_mode == RUNNER_ALGO_FAST_SLOW)
+        return "fast_and_slow";
+    return "unknown";
+}
+
 int main(int argc, char **argv)
 {
     int ret = 1;
+    int perf_enabled = 0;
     struct runner_args args = { 0 };
-    double elapsed_sec = 0.0;
-    struct list_node *head, *mid = NULL;
+    double cache_miss_rate = 0.0;
+    double l1_dcache_load_miss_rate = 0.0;
+    struct list_node *head = NULL;
+    struct list_node *mid = NULL;
     struct perf_counters counters = { .leader_fd = -1,
+                                      .task_clock_fd = -1,
                                       .cycles_fd = -1,
                                       .cache_refs_fd = -1,
                                       .cache_misses_fd = -1,
                                       .l1_dcache_loads_fd = -1,
                                       .l1_dcache_load_misses_fd = -1,
-                                      .instructions_fd = -1 };
+                                      .l1_dcache_prefetches_fd = -1 };
     struct perf_counter_values perf_values = { 0 };
-    double cache_miss_rate = 0.0, l1_dcache_load_miss_rate = 0.0, ipc = 0.0;
 
     /* Parse CLI arguments into a single config struct. */
     if (runner_args_parse(argc, argv, &args) < 0) {
@@ -54,12 +73,20 @@ int main(int argc, char **argv)
         goto cleanup;
     }
 
+    // 宣告一個大於 L3 Cache 的 64MB array 
+    size_t dummy_size = 64 * 1024 * 1024; 
+    char *dummy = malloc(dummy_size);
+    for (size_t i = 0; i < dummy_size; i += 64) { // 每次跳一個 Cache Line (64 Bytes)
+        dummy[i] = 1; // 強制寫入，迫使 CPU 將先前 Linked List 從 L1/L2/L3 evict
+    }
+    free(dummy);
+
     if (perf_counters_enable(&counters) < 0) {
         perror("PERF_EVENT_IOC_ENABLE failed");
         goto cleanup;
     }
+    perf_enabled = 1;
 
-    /* Measure only one traversal of the selected algorithm. */
     if (args.algo_mode == RUNNER_ALGO_SINGLE)
         mid = single_pointer_middle_node(head);
     else
@@ -69,50 +96,38 @@ int main(int argc, char **argv)
         perror("PERF_EVENT_IOC_DISABLE failed");
         goto cleanup;
     }
+    perf_enabled = 0;
 
     if (perf_counters_read(&counters, &perf_values) < 0) {
         perror("read perf counters failed");
         goto cleanup;
     }
 
-    /* Derive user-facing metrics from raw perf counters. */
-    elapsed_sec = (double)perf_values.task_clock_ns / 1e9;
-    if (perf_values.cache_refs > 0)
-        cache_miss_rate = 100.0 * (double)perf_values.cache_misses /
-                          (double)perf_values.cache_refs;
-    if (perf_values.l1_dcache_loads > 0)
-        l1_dcache_load_miss_rate =
-            100.0 * (double)perf_values.l1_dcache_load_misses /
-            (double)perf_values.l1_dcache_loads;
-    if (perf_values.cycles > 0)
-        ipc = (double)perf_values.instructions / (double)perf_values.cycles;
+    cache_miss_rate = percent_rate(perf_values.cache_misses, perf_values.cache_refs);
+    l1_dcache_load_miss_rate = percent_rate(perf_values.l1_dcache_load_misses,
+                                            perf_values.l1_dcache_loads);
 
-    /* Print benchmark summary and perf statistics. */
-    printf("mode=%s, count=%d, algo=%s\n",
-           create_mode_name(args.list_mode), args.count,
-           runner_algo_mode_name(args.algo_mode));
-    if (args.use_fixed_seed)
-        printf("seed=%u\n", args.seed);
+    printf("mode=%s, count=%d, algo=%s\n", create_mode_name(args.list_mode),
+           args.count, algo_mode_name(args.algo_mode));
+    printf("seed=%u\n", args.seed);
     if (mid)
         printf("middle node: addr=%p, val=%d\n", (void *)mid, mid->val);
 
     printf("task-clock(ns): %" PRIu64 "\n", perf_values.task_clock_ns);
-    printf("elapsed(sec): %.6f\n", elapsed_sec);
     printf("cpu-cycles: %" PRIu64 "\n", perf_values.cycles);
-    printf("cache-references: %" PRIu64 "\n", perf_values.cache_refs);
-    printf("cache-misses: %" PRIu64 "\n", perf_values.cache_misses);
     printf("cache-miss-rate: %.2f%%\n", cache_miss_rate);
-    printf("L1-dcache-loads: %" PRIu64 "\n", perf_values.l1_dcache_loads);
-    printf("L1-dcache-load-misses: %" PRIu64 "\n",
-           perf_values.l1_dcache_load_misses);
     printf("L1-dcache-load-miss-rate: %.2f%%\n", l1_dcache_load_miss_rate);
-    printf("instructions: %" PRIu64 "\n", perf_values.instructions);
-    printf("IPC: %.2f\n", ipc);
+    if (perf_values.has_l1_dcache_prefetches)
+        printf("l1-dcache-prefetches: %" PRIu64 "\n", perf_values.l1_dcache_prefetches);
+    else
+        printf("l1-dcache-prefetches: N/A\n");
 
     ret = 0;
 
 cleanup:
     /* Always release resources, including partially-initialized counters. */
+    if (perf_enabled)
+        (void)perf_counters_disable(&counters);
     perf_counters_close(&counters);
     free_list(head);
     return ret;
