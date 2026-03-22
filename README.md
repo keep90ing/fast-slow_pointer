@@ -1,119 +1,61 @@
-# Fast/Slow Pointer Locality Lab
+# Fast/Slow Pointer Benchmark
 
-## Node Layout Modes
+## Overview
+This project benchmarks middle-node traversal on singly linked lists and provides a utility to inspect node layout.
 
-1. `sequential` (`1`)
-- 每個節點獨立 `malloc`
-- 依建立順序串接
-- locality 較好，分配器常把節點放在相近區域
-
-2. `random` (`2`)
-- 建立完節點後隨機 permutation 串接
-- 最接近 pointer-chasing 的 worst-case cache 行為
+The repository documents only two executables:
+- `bench`: performance measurement for traversal algorithms.
+- `check`: structural inspection of the generated linked list.
 
 ## Build
-
 ```bash
 make
 ```
 
-## runner: create + algorithm benchmark
+## `bench`
+### Purpose
+`bench` builds a linked list, measures only the traversal phase with `perf_event_open`, and reports performance counters.
 
-`runner` 會：
-
-- 先建立一次指定型態與大小的 linked list
-- linked list 建立邏輯由 `create.c` 提供 API，只能透過 `runner`、`traverse`、`check` 使用
-- 只在 traversal 期間啟用 `perf_event_open()` 計數器
-- traversal 結束立刻停用計數器，最後才 `free` list
-
+### Usage
 ```bash
-./bin/runner <mode> <count> <algo> [seed]
+./bin/bench <mode> <count> <algo> [seed]
 ```
 
-參數：
+### Arguments
+- `mode`: `sequential|1` or `random|2`
+- `count`: number of nodes (`> 0`)
+- `algo`: `single|single_pointer|1` or `fastslow|fast_and_slow|2`
+- `seed`: optional unsigned integer (useful for reproducible random-mode runs)
 
-- `mode`: `sequential|1`、`random|2`
-- `count`: 節點數量（`> 0`）
-- `algo`: `single|single_pointer|1`、`fastslow|fast_and_slow|2`
-- `seed`: 可選，固定 random 模式用的 seed（不給就用目前時間）
-
-輸出至少包含：
-
-- `elapsed(sec)`
-- `cache-references:u`
-- `cache-misses:u`
+### Output
+`bench` outputs:
+- `task-clock(ns)`
+- `cpu-cycles`
 - `cache-miss-rate`
-- `L1-dcache-prefetches:u`
-- `IPC`
+- `L1-dcache-load-miss-rate`
+- `l1-dcache-prefetches` (or `N/A` when unsupported)
 
-範例：
-
+### Examples
 ```bash
-./bin/runner sequential 1000000 single
-./bin/runner random 1000000 fastslow 12345
+./bin/bench sequential 1000000 single
+./bin/bench random 1000000 fastslow 12345
 ```
 
-## traverse: create + traversal only
+## `check`
+### Purpose
+`check` prints the linked-list traversal order, including each node value, node address, and next pointer.
 
-`traverse` 保留 `rounds` 參數，但不做任何 `perf_event_open()` 採樣。
-
-```bash
-./bin/traverse <mode> <count> <algo> <rounds> [seed]
-```
-
-它會：
-
-- 建立 linked list
-- 執行指定演算法的 traversal
-- 輸出 middle node 與 `elapsed(sec)`
-- 最後釋放 linked list
-
-`mode` 使用 `sequential|1` 或 `random|2`。
-
-## check: inspect node layout
-
-`check` 用來檢視整條 linked list 的節點位址、值與 `next` 指標。
-
+### Usage
 ```bash
 ./bin/check <mode> <count> [seed]
 ```
 
-參數：
+### Arguments
+- `mode`: `sequential|1` or `random|2`
+- `count`: number of nodes (`> 0`)
+- `seed`: optional unsigned integer (used in random mode)
 
-- `mode`: `sequential|1`、`random|2`
-- `count`: 節點數量（`> 0`）
-- `seed`: 可選，只有 `random` 模式下有意義
-
-輸出格式：
-
-```text
-node i = (address), val = ..., next = ...
-```
-
-## check: 印出 linked list 串接位址
-
-`check` 只需要 3 個參數：
-
+### Example
 ```bash
-./bin/check <mode> <count> [seed]
-```
-
-參數：
-
-- `mode`: `contiguous|1`、`sequential|2`、`random|3`
-- `count`: 節點數量（`> 0`）
-- `seed`: 可選，只有在 `random` 模式下有意義；不給就用目前時間
-
-`check` 會：
-
-- 透過 `create` API 建立 linked list
-- 依 `next` 串接順序印出各 node 的位址，格式為 `addressA ----> addressB`
-- 最後呼叫 `destroy_list()` 釋放記憶體
-
-範例：
-
-```bash
-./bin/check contiguous 8
-./bin/check sequential 8
 ./bin/check random 8 42
 ```
