@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import argparse
+import csv
 import os
-import re
+from statistics import median
 from pathlib import Path
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
@@ -9,33 +10,33 @@ import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
 
 
-EXPECTED_COUNTS = [10 ** i for i in range(2, 10)]
-XTICK_LABELS = [f"10^{i}" for i in range(2, 10)]
+EXPECTED_COUNTS = [10 ** i for i in range(3, 10)]
+XTICK_LABELS = [f"10^{i}" for i in range(3, 10)]
 
 SERIES_CONFIG = {
     "random_fastslow": {
         "color": "#E69F00",
         "marker": "o",
         "linestyle": "-",
-        "default_path": Path("logs/random_fastslow.txt"),
+        "default_path": Path("logs/random_fastslow.csv"),
     },
     "random_single": {
         "color": "#56B4E9",
         "marker": "s",
         "linestyle": "--",
-        "default_path": Path("logs/random_single.txt"),
+        "default_path": Path("logs/random_single.csv"),
     },
     "sequential_fastslow": {
         "color": "#009E73",
         "marker": "^",
         "linestyle": "-.",
-        "default_path": Path("logs/sequential_fastslow.txt"),
+        "default_path": Path("logs/sequential_fastslow.csv"),
     },
     "sequential_single": {
         "color": "#D55E00",
         "marker": "D",
         "linestyle": ":",
-        "default_path": Path("logs/sequential_single.txt"),
+        "default_path": Path("logs/sequential_single.csv"),
     },
 }
 
@@ -54,88 +55,119 @@ X_JITTER_FACTOR = {
     "sequential_single": 1.03,
 }
 
-METRIC_PATTERNS = {
-    "task_clock_ns": re.compile(r"task-clock\(ns\):\s*(\d+)$"),
-    "cpu_cycles": re.compile(r"cpu-cycles:\s*(\d+)$"),
-    "cache_miss_rate": re.compile(r"cache-miss-rate:\s*([\d.]+)%$"),
-    "l1_miss_rate": re.compile(r"L1-dcache-load-miss-rate:\s*([\d.]+)%$"),
-    "l1_prefetches": re.compile(r"l1-dcache-prefetches:\s*(\d+)$"),
+CSV_COLUMNS = {
+    "cpu_cycles": ("cpu_cycles",),
+    "cache_miss_rate": ("cache_miss_rate",),
+    "l1_miss_rate": ("l1_dcache_load_miss_rate",),
+    "l1_prefetches": ("l1_dcache_prefetches",),
+    "dtlb_miss_rate": ("dtlb_load_miss_rate",),
 }
 
+OPTIONAL_METRICS = {"l1_prefetches", "dtlb_miss_rate"}
+
 PLOT_TARGETS = [
-    ("task_clock_ns", "task-clock(ns)"),
     ("cpu_cycles", "cpu-cycles"),
     ("cache_miss_rate", "cache-miss-rate (%)"),
     ("l1_miss_rate", "L1-dcache-load-miss-rate (%)"),
     ("l1_prefetches", "l1-dcache-prefetches"),
+    ("dtlb_miss_rate", "DTLB-load-miss-rate (%)"),
 ]
 
 METRIC_AXIS_STYLE = {
-    "task_clock_ns": {"yscale": "log"},
     "cpu_cycles": {"yscale": "log"},
     "cache_miss_rate": {"yscale": "linear"},
     "l1_miss_rate": {"yscale": "linear"},
     "l1_prefetches": {"yscale": "linear", "negative_pad_ratio": 0.08},
+    "dtlb_miss_rate": {"yscale": "linear"},
 }
 
 
 def parse_metrics_file(path: Path):
-    text = path.read_text(encoding="utf-8")
-    data_by_count = {}
-    current_count = None
+    data_by_count = {
+        count: {metric_name: [] for metric_name in CSV_COLUMNS}
+        for count in EXPECTED_COUNTS
+    }
 
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
+    with path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames:
+            raise ValueError(f"{path}: empty CSV")
+        if "count" not in reader.fieldnames:
+            raise ValueError(f"{path}: missing CSV column 'count'")
 
-        m_count = re.search(r"count=(\d+)", line)
-        if m_count:
-            current_count = int(m_count.group(1))
-            data_by_count.setdefault(current_count, {})
-            continue
+        metric_column_map = {}
+        for metric_name, candidates in CSV_COLUMNS.items():
+            found = None
+            for col in candidates:
+                if col in reader.fieldnames:
+                    found = col
+                    break
+            if not found:
+                if metric_name in OPTIONAL_METRICS:
+                    metric_column_map[metric_name] = None
+                    continue
+                raise ValueError(
+                    f"{path}: missing CSV columns for '{metric_name}', "
+                    f"expected one of {candidates}"
+                )
+            metric_column_map[metric_name] = found
 
-        if current_count is None:
-            continue
-
-        for metric_name, pattern in METRIC_PATTERNS.items():
-            m = pattern.match(line)
-            if not m:
+        for row in reader:
+            if not row:
                 continue
-            if metric_name in ("cache_miss_rate", "l1_miss_rate"):
-                value = float(m.group(1))
-            else:
-                value = int(m.group(1))
-            data_by_count[current_count][metric_name] = value
-            break
+            try:
+                count = int(row["count"])
+            except (TypeError, ValueError):
+                continue
+            if count not in data_by_count:
+                continue
 
-    missing_counts = [c for c in EXPECTED_COUNTS if c not in data_by_count]
+            for metric_name, csv_col in metric_column_map.items():
+                if csv_col is None:
+                    continue
+                raw = (row.get(csv_col) or "").strip()
+                if not raw or raw == "N/A":
+                    continue
+                try:
+                    value = float(raw)
+                except ValueError:
+                    continue
+                data_by_count[count][metric_name].append(value)
+
+    missing_counts = [
+        c
+        for c in EXPECTED_COUNTS
+        if not any(data_by_count[c][metric] for metric in CSV_COLUMNS)
+    ]
     if missing_counts:
         raise ValueError(f"{path}: missing count nodes {missing_counts}")
 
     for count in EXPECTED_COUNTS:
-        missing_metrics = [
-            metric for metric in METRIC_PATTERNS if metric not in data_by_count[count]
-        ]
+        missing_metrics = []
+        for metric_name in CSV_COLUMNS:
+            if data_by_count[count][metric_name]:
+                continue
+            if metric_name in OPTIONAL_METRICS:
+                data_by_count[count][metric_name] = [0.0]
+                continue
+            missing_metrics.append(metric_name)
         if missing_metrics:
             raise ValueError(
                 f"{path}: missing metrics for count={count}: {missing_metrics}"
             )
 
     series = {}
-    for metric_name in METRIC_PATTERNS:
-        series[metric_name] = [data_by_count[c][metric_name] for c in EXPECTED_COUNTS]
+    for metric_name in CSV_COLUMNS:
+        series[metric_name] = [median(data_by_count[c][metric_name]) for c in EXPECTED_COUNTS]
     return series
 
 
-def plot_one_metric(all_series_data, metric_name, ylabel, out_path: Path):
-    plt.figure(figsize=(12.5, 7.2))
-
+def draw_metric_on_axis(ax, all_series_data, metric_name, ylabel, show_legend=True):
     for z_index, series_name in enumerate(SERIES_ORDER, start=1):
         conf = SERIES_CONFIG[series_name]
         y = all_series_data[series_name][metric_name]
         x = [count * X_JITTER_FACTOR[series_name] for count in EXPECTED_COUNTS]
-        (line,) = plt.plot(
+        (line,) = ax.plot(
             x,
             y,
             marker=conf["marker"],
@@ -156,37 +188,44 @@ def plot_one_metric(all_series_data, metric_name, ylabel, out_path: Path):
             [pe.Stroke(linewidth=2.8, foreground="white", alpha=0.9), pe.Normal()]
         )
 
-    plt.xscale("log", base=10)
-    plt.xticks(EXPECTED_COUNTS, XTICK_LABELS)
+    ax.set_xscale("log", base=10)
+    ax.set_xticks(EXPECTED_COUNTS)
+    ax.set_xticklabels(XTICK_LABELS)
 
     axis_style = METRIC_AXIS_STYLE[metric_name]
     if axis_style["yscale"] == "log":
-        plt.yscale("log")
+        ax.set_yscale("log")
     elif axis_style["yscale"] == "symlog":
-        plt.yscale("symlog", linthresh=axis_style["linthresh"])
+        ax.set_yscale("symlog", linthresh=axis_style["linthresh"])
     if axis_style.get("negative_pad_ratio") is not None:
         y_max = max(max(all_series_data[name][metric_name]) for name in SERIES_ORDER)
         if y_max <= 0:
-            plt.ylim(bottom=-1.0, top=1.0)
+            ax.set_ylim(bottom=-1.0, top=1.0)
         else:
             pad = max(1.0, y_max * axis_style["negative_pad_ratio"])
-            plt.ylim(bottom=-pad)
+            ax.set_ylim(bottom=-pad)
 
-    plt.xlabel("number of nodes")
-    plt.ylabel(ylabel)
-    plt.minorticks_on()
-    plt.grid(True, which="major", linestyle="--", linewidth=0.7, alpha=0.45)
-    plt.grid(True, which="minor", linestyle=":", linewidth=0.5, alpha=0.28)
-    plt.legend(ncol=2, frameon=True, framealpha=0.9, fontsize=10)
-    plt.tight_layout()
+    ax.set_xlabel("number of nodes")
+    ax.set_ylabel(ylabel)
+    ax.minorticks_on()
+    ax.grid(True, which="major", linestyle="--", linewidth=0.7, alpha=0.45)
+    ax.grid(True, which="minor", linestyle=":", linewidth=0.5, alpha=0.28)
+    if show_legend:
+        ax.legend(ncol=2, frameon=True, framealpha=0.9, fontsize=10)
+
+
+def plot_one_metric(all_series_data, metric_name, ylabel, out_path: Path):
+    fig, ax = plt.subplots(figsize=(12.5, 7.2))
+    draw_metric_on_axis(ax, all_series_data, metric_name, ylabel, show_legend=True)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out_path, dpi=360)
-    plt.close()
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=360)
+    plt.close(fig)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Plot 5 performance metric line charts from 4 benchmark logs."
+        description="Plot metric charts from 4 benchmark CSV files using per-count medians."
     )
     parser.add_argument(
         "--random-fastslow",

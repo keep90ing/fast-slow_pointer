@@ -1,13 +1,13 @@
 #define _POSIX_C_SOURCE 200809L
 #define _GNU_SOURCE
 
+#include "bench_csv.h"
 #include "create.h"
 #include "fast_and_slow.h"
 #include "perf_counter.h"
 #include "runner_args.h"
 #include "single_pointer.h"
 
-#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -18,15 +18,6 @@ static double percent_rate(uint64_t numerator, uint64_t denominator)
     return 100.0 * (double)numerator / (double)denominator;
 }
 
-static const char *algo_mode_name(int algo_mode)
-{
-    if (algo_mode == RUNNER_ALGO_SINGLE)
-        return "single_pointer";
-    if (algo_mode == RUNNER_ALGO_FAST_SLOW)
-        return "fast_and_slow";
-    return "unknown";
-}
-
 int main(int argc, char **argv)
 {
     int ret = 1;
@@ -34,16 +25,18 @@ int main(int argc, char **argv)
     struct runner_args args = { 0 };
     double cache_miss_rate = 0.0;
     double l1_dcache_load_miss_rate = 0.0;
+    double dtlb_load_miss_rate = 0.0;
     struct list_node *head = NULL;
     struct list_node *mid = NULL;
     struct perf_counters counters = { .leader_fd = -1,
-                                      .task_clock_fd = -1,
                                       .cycles_fd = -1,
                                       .cache_refs_fd = -1,
                                       .cache_misses_fd = -1,
                                       .l1_dcache_loads_fd = -1,
                                       .l1_dcache_load_misses_fd = -1,
-                                      .l1_dcache_prefetches_fd = -1 };
+                                      .l1_dcache_prefetches_fd = -1,
+                                      .dtlb_loads_fd = -1,
+                                      .dtlb_load_misses_fd = -1 };
     struct perf_counter_values perf_values = { 0 };
 
     /* Parse CLI arguments into a single config struct. */
@@ -73,8 +66,8 @@ int main(int argc, char **argv)
         goto cleanup;
     }
 
-    // 宣告一個大於 L3 Cache 的 64MB array 
-    size_t dummy_size = 64 * 1024 * 1024; 
+    // 宣告一個大於 L3 Cache 的 64MB array
+    size_t dummy_size = 64 * 1024 * 1024;
     char *dummy = malloc(dummy_size);
     for (size_t i = 0; i < dummy_size; i += 64) { // 每次跳一個 Cache Line (64 Bytes)
         dummy[i] = 1; // 強制寫入，迫使 CPU 將先前 Linked List 從 L1/L2/L3 evict
@@ -106,21 +99,15 @@ int main(int argc, char **argv)
     cache_miss_rate = percent_rate(perf_values.cache_misses, perf_values.cache_refs);
     l1_dcache_load_miss_rate = percent_rate(perf_values.l1_dcache_load_misses,
                                             perf_values.l1_dcache_loads);
+    dtlb_load_miss_rate = percent_rate(perf_values.dtlb_load_misses,
+                                       perf_values.dtlb_loads);
 
-    printf("mode=%s, count=%d, algo=%s\n", create_mode_name(args.list_mode),
-           args.count, algo_mode_name(args.algo_mode));
-    printf("seed=%u\n", args.seed);
-    if (mid)
-        printf("middle node: addr=%p, val=%d\n", (void *)mid, mid->val);
-
-    printf("task-clock(ns): %" PRIu64 "\n", perf_values.task_clock_ns);
-    printf("cpu-cycles: %" PRIu64 "\n", perf_values.cycles);
-    printf("cache-miss-rate: %.2f%%\n", cache_miss_rate);
-    printf("L1-dcache-load-miss-rate: %.2f%%\n", l1_dcache_load_miss_rate);
-    if (perf_values.has_l1_dcache_prefetches)
-        printf("l1-dcache-prefetches: %" PRIu64 "\n", perf_values.l1_dcache_prefetches);
-    else
-        printf("l1-dcache-prefetches: N/A\n");
+    if (bench_csv_append_row(&args, mid, &perf_values, cache_miss_rate,
+                             l1_dcache_load_miss_rate,
+                             dtlb_load_miss_rate) < 0) {
+        perror("failed to append CSV output");
+        goto cleanup;
+    }
 
     ret = 0;
 

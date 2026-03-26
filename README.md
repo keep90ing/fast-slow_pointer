@@ -29,11 +29,11 @@ make
 
 ### Output
 `bench` outputs:
-- `task-clock(ns)`
 - `cpu-cycles`
 - `cache-miss-rate`
 - `L1-dcache-load-miss-rate`
 - `l1-dcache-prefetches` (or `N/A` when unsupported)
+- `DTLB-load-miss-rate` (or `N/A` when unsupported)
 
 ### Examples
 ```bash

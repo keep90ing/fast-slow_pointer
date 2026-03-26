@@ -5,17 +5,17 @@
 
 struct perf_counters {
     int leader_fd;
-    int task_clock_fd;
     int cycles_fd;
     int cache_refs_fd;
     int cache_misses_fd;
     int l1_dcache_loads_fd;
     int l1_dcache_load_misses_fd;
     int l1_dcache_prefetches_fd;
+    int dtlb_loads_fd;
+    int dtlb_load_misses_fd;
 };
 
 struct perf_counter_values {
-    uint64_t task_clock_ns;
     uint64_t cycles;
     uint64_t cache_refs;
     uint64_t cache_misses;
@@ -23,6 +23,9 @@ struct perf_counter_values {
     uint64_t l1_dcache_load_misses;
     uint64_t l1_dcache_prefetches;
     int has_l1_dcache_prefetches;
+    uint64_t dtlb_loads;
+    uint64_t dtlb_load_misses;
+    int has_dtlb_load_miss_rate;
 };
 
 int perf_counters_open(struct perf_counters *counters);

@@ -18,21 +18,23 @@ static int perf_event_open(struct perf_event_attr *attr, pid_t pid, int cpu,
 static void init_perf_counters(struct perf_counters *counters)
 {
     counters->leader_fd = -1;
-    counters->task_clock_fd = -1;
     counters->cycles_fd = -1;
     counters->cache_refs_fd = -1;
     counters->cache_misses_fd = -1;
     counters->l1_dcache_loads_fd = -1;
     counters->l1_dcache_load_misses_fd = -1;
     counters->l1_dcache_prefetches_fd = -1;
+    counters->dtlb_loads_fd = -1;
+    counters->dtlb_load_misses_fd = -1;
 }
 
 static int required_counters_ready(const struct perf_counters *counters)
 {
-    return counters && counters->leader_fd >= 0 && counters->task_clock_fd >= 0 &&
-           counters->cycles_fd >= 0 && counters->cache_refs_fd >= 0 &&
-           counters->cache_misses_fd >= 0 && counters->l1_dcache_loads_fd >= 0 &&
-           counters->l1_dcache_load_misses_fd >= 0;
+    return counters && counters->leader_fd >= 0 && counters->cycles_fd >= 0 &&
+           counters->cache_refs_fd >= 0 && counters->cache_misses_fd >= 0 &&
+           counters->l1_dcache_loads_fd >= 0 &&
+           counters->l1_dcache_load_misses_fd >= 0 &&
+           counters->dtlb_loads_fd >= 0 && counters->dtlb_load_misses_fd >= 0;
 }
 
 static void close_counter_fd(int *fd)
@@ -50,16 +52,14 @@ static uint64_t hw_cache_config(uint64_t cache_id, uint64_t op_id, uint64_t resu
 
 static int apply_ioctl_to_all(const struct perf_counters *counters, unsigned long req)
 {
-    /*
-     * Keep task-clock/cycles/prefetch as independent events, and keep cache
-     * ratio events in one atomic hardware group.
-     */
-    if (ioctl(counters->task_clock_fd, req, 0) < 0)
-        return -1;
+    /* Keep cycles/prefetch/DTLB groups independent, and cache ratio events in one group. */
     if (ioctl(counters->cycles_fd, req, 0) < 0)
         return -1;
     if (counters->l1_dcache_prefetches_fd >= 0 &&
         ioctl(counters->l1_dcache_prefetches_fd, req, 0) < 0)
+        return -1;
+    if (counters->dtlb_loads_fd >= 0 &&
+        ioctl(counters->dtlb_loads_fd, req, PERF_IOC_FLAG_GROUP) < 0)
         return -1;
     return ioctl(counters->leader_fd, req, PERF_IOC_FLAG_GROUP);
 }
@@ -137,11 +137,6 @@ int perf_counters_open(struct perf_counters *counters)
 
     init_perf_counters(counters);
 
-    counters->task_clock_fd =
-        open_counter(PERF_TYPE_SOFTWARE, PERF_COUNT_SW_TASK_CLOCK, -1, 1);
-    if (counters->task_clock_fd < 0)
-        goto fail;
-
     counters->cycles_fd =
         open_counter(PERF_TYPE_HARDWARE, PERF_COUNT_HW_CPU_CYCLES, -1, 1);
     if (counters->cycles_fd < 0)
@@ -178,8 +173,8 @@ int perf_counters_open(struct perf_counters *counters)
         goto fail;
 
     /*
-     * Prefetch events are optional across different PMUs. Keep runner
-     * functional if this CPU/kernel cannot open them.
+     * Prefetch events are optional across PMUs. Keep the benchmark usable
+     * when this CPU/kernel cannot expose them.
      */
     counters->l1_dcache_prefetches_fd =
         open_counter(PERF_TYPE_HW_CACHE,
@@ -187,9 +182,26 @@ int perf_counters_open(struct perf_counters *counters)
                                      PERF_COUNT_HW_CACHE_OP_PREFETCH,
                                      PERF_COUNT_HW_CACHE_RESULT_ACCESS),
                      -1, 1);
-    if (counters->l1_dcache_prefetches_fd < 0) {
+    if (counters->l1_dcache_prefetches_fd < 0)
         counters->l1_dcache_prefetches_fd = -1;
-    }
+
+    counters->dtlb_loads_fd =
+        open_counter(PERF_TYPE_HW_CACHE,
+                     hw_cache_config(PERF_COUNT_HW_CACHE_DTLB,
+                                     PERF_COUNT_HW_CACHE_OP_READ,
+                                     PERF_COUNT_HW_CACHE_RESULT_ACCESS),
+                     -1, 1);
+    if (counters->dtlb_loads_fd < 0)
+        goto fail;
+
+    counters->dtlb_load_misses_fd =
+        open_counter(PERF_TYPE_HW_CACHE,
+                     hw_cache_config(PERF_COUNT_HW_CACHE_DTLB,
+                                     PERF_COUNT_HW_CACHE_OP_READ,
+                                     PERF_COUNT_HW_CACHE_RESULT_MISS),
+                     counters->dtlb_loads_fd, 0);
+    if (counters->dtlb_load_misses_fd < 0)
+        goto fail;
 
     return 0;
 
@@ -204,12 +216,13 @@ void perf_counters_close(struct perf_counters *counters)
         return;
 
     close_counter_fd(&counters->l1_dcache_prefetches_fd);
+    close_counter_fd(&counters->dtlb_load_misses_fd);
+    close_counter_fd(&counters->dtlb_loads_fd);
     close_counter_fd(&counters->l1_dcache_load_misses_fd);
     close_counter_fd(&counters->l1_dcache_loads_fd);
     close_counter_fd(&counters->cache_misses_fd);
     if (counters->cache_refs_fd != counters->leader_fd)
         close_counter_fd(&counters->cache_refs_fd);
-    close_counter_fd(&counters->task_clock_fd);
     close_counter_fd(&counters->cycles_fd);
     close_counter_fd(&counters->leader_fd);
     counters->cache_refs_fd = -1;
@@ -255,8 +268,6 @@ int perf_counters_read(const struct perf_counters *counters,
 
     memset(values, 0, sizeof(*values));
 
-    if (read_counter_value(counters->task_clock_fd, &values->task_clock_ns) < 0)
-        return -1;
     if (read_counter_value(counters->cycles_fd, &values->cycles) < 0)
         return -1;
     if (read_counter_value(counters->cache_refs_fd, &values->cache_refs) < 0)
@@ -269,12 +280,17 @@ int perf_counters_read(const struct perf_counters *counters,
     if (read_counter_value(counters->l1_dcache_load_misses_fd,
                            &values->l1_dcache_load_misses) < 0)
         return -1;
-
     if (counters->l1_dcache_prefetches_fd >= 0 &&
         read_counter_value(counters->l1_dcache_prefetches_fd,
                            &values->l1_dcache_prefetches) < 0)
         return -1;
     values->has_l1_dcache_prefetches = counters->l1_dcache_prefetches_fd >= 0;
+    if (read_counter_value(counters->dtlb_loads_fd, &values->dtlb_loads) < 0)
+        return -1;
+    if (read_counter_value(counters->dtlb_load_misses_fd,
+                           &values->dtlb_load_misses) < 0)
+        return -1;
+    values->has_dtlb_load_miss_rate = 1;
 
     return 0;
 }
