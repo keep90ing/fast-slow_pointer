@@ -39,6 +39,15 @@ static double elapsed_seconds(const struct timespec *start,
            (double)(end->tv_nsec - start->tv_nsec) / 1000000000.0;
 }
 
+static int count_nodes(struct list_node *head) {
+    int count = 0;
+    while (head) {
+        count++;
+        head = head->next;
+    }
+    return count;
+}
+
 static void split_list(struct list_node *source, struct list_node **front,
                        struct list_node **back)
 {
@@ -62,19 +71,30 @@ static struct list_node *random_merge(struct list_node *a, struct list_node *b)
 {
     struct list_node dummy;
     struct list_node *tail = &dummy;
-
     dummy.next = NULL;
+
+    // get the length of linked list
+    int len_a = count_nodes(a);
+    int len_b = count_nodes(b);
+
     while (a && b) {
-        if (rand() & 1) {
+        // 產生 0 到 (len_a + len_b - 1) 的亂數
+        int r = rand() % (len_a + len_b);
+
+        // 根據剩餘長度比例來決定抽取哪一邊
+        if (r < len_a) {
             tail->next = a;
             a = a->next;
+            len_a--;  // 更新剩餘長度
         } else {
             tail->next = b;
             b = b->next;
+            len_b--;  // 更新剩餘長度
         }
         tail = tail->next;
     }
 
+    // 將剩餘的節點接上
     tail->next = a ? a : b;
     return dummy.next;
 }

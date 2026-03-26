@@ -37,7 +37,7 @@ static struct list_node *build_list(int n) {
     struct list_node **indirect = &head;
     struct list_node *new;
 
-    for (int i = 1; i <= n; i++) {
+    for (int i = 0; i <= n-1; i++) {
         new = malloc(1 * sizeof(*new));
         
         if (!new)
@@ -64,13 +64,13 @@ err_free_list:
 static void shuffle_with_array(struct list_node **head) {
     if (!head || !*head || !(*head)->next) return;
 
-    // 1. compute the length of the linked list
+    // Phase 1: compute the length of the linked list
     int len = 0;
     for (struct list_node *curr = *head; curr; curr = curr->next) {
         len++;
     }
 
-    // 2. malloc an array to hold the node pointers
+    // Phase 2: malloc an array to hold the node pointers
     struct list_node **arr = malloc(len * sizeof(struct list_node *));
     if (!arr) return; // malloc failed
 
@@ -80,7 +80,7 @@ static void shuffle_with_array(struct list_node **head) {
         curr = curr->next;
     }
 
-    // 3. execute Fisher-Yates shuffle on the array
+    // Phase 3: execute Fisher-Yates shuffle on the array
     for (int i = len - 1; i > 0; i--) {
         int random = rand() % (i + 1);
         struct list_node *tmp = arr[i];
@@ -88,7 +88,7 @@ static void shuffle_with_array(struct list_node **head) {
         arr[random] = tmp;
     }
 
-    // 4. append shuffled nodes to a new linked list
+    // Phase 4: append shuffled nodes to a new linked list
     struct list_node **indirect = head;
     for (int i = 0; i < len; i++) {
         *indirect = arr[i];
